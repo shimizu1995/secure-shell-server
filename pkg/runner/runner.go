@@ -181,6 +181,96 @@ func (r *SafeRunner) RunCommand(ctx context.Context, command string, workingDir 
 	return lastCdDir, err
 }
 
+// ValidateScript parses the given shell script and validates every command
+// against the configured allow/deny lists without executing anything.
+// It returns nil if all commands are allowed, or an error describing the first
+// disallowed command (matching the message produced by RunCommand).
+func (r *SafeRunner) ValidateScript(ctx context.Context, command string, workingDir string) error {
+	absWorkingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for working directory: %w", err)
+	}
+
+	dirAllowed, dirMessage := r.validator.IsDirectoryAllowed(absWorkingDir)
+	if !dirAllowed {
+		return fmt.Errorf("directory validation failed: %s", dirMessage)
+	}
+
+	parser := syntax.NewParser()
+	prog, err := parser.Parse(strings.NewReader(command), "")
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+
+	var lastCdDir string
+	callFunc := func(callCtx context.Context, args []string) ([]string, error) {
+		if len(args) == 0 {
+			return args, nil
+		}
+		cmd := args[0]
+		cmdForValidation := cmd
+		if filepath.IsAbs(cmd) {
+			cmdForValidation = filepath.Base(cmd)
+		}
+		allowed, errMsg := r.validator.ValidateCommand(cmdForValidation, args[1:], absWorkingDir)
+		if !allowed {
+			return args, fmt.Errorf("%s", errMsg)
+		}
+		if cmdForValidation == "cd" {
+			return r.handleCdCall(callCtx, args, &lastCdDir)
+		}
+		return args, nil
+	}
+
+	// ExecHandler that performs no actual execution.
+	noopExec := func(_ context.Context, _ []string) error { return nil }
+
+	// OpenHandler that validates the directory but never opens real files.
+	validateOnlyOpen := func(_ context.Context, path string, _ int, _ os.FileMode) (io.ReadWriteCloser, error) {
+		absPath, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return nil, &os.PathError{Op: "open", Path: path, Err: absErr}
+		}
+		if resolved, resolveErr := filepath.EvalSymlinks(absPath); resolveErr == nil {
+			absPath = resolved
+		}
+		fileDir := filepath.Dir(absPath)
+		allowed, msg := r.validator.IsDirectoryAllowed(fileDir)
+		if !allowed {
+			return nil, &os.PathError{
+				Op:   "open",
+				Path: path,
+				Err:  fmt.Errorf("access denied: file is outside allowed directories: %s", msg),
+			}
+		}
+		return discardRWC{}, nil
+	}
+
+	interpRunner, err := interp.New(
+		interp.CallHandler(callFunc),
+		interp.ExecHandlers(func(_ interp.ExecHandlerFunc) interp.ExecHandlerFunc { return noopExec }),
+		interp.StdIO(nil, io.Discard, io.Discard),
+		interp.Env(nil),
+		interp.Dir(absWorkingDir),
+		interp.OpenHandler(validateOnlyOpen),
+	)
+	if err != nil {
+		return fmt.Errorf("interpreter creation error: %w", err)
+	}
+
+	if err := interpRunner.Run(ctx, prog); err != nil {
+		return err
+	}
+	return nil
+}
+
+// discardRWC is an io.ReadWriteCloser that discards writes and returns EOF on read.
+type discardRWC struct{}
+
+func (discardRWC) Read(_ []byte) (int, error)  { return 0, io.EOF }
+func (discardRWC) Write(p []byte) (int, error) { return len(p), nil }
+func (discardRWC) Close() error                { return nil }
+
 // secureOpenHandler validates file access against allowed directories before opening.
 func (r *SafeRunner) secureOpenHandler(ctx context.Context, path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
 	absPath, absErr := filepath.Abs(path)

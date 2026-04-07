@@ -47,6 +47,42 @@ The binaries will be available in the `bin/` directory.
 - `-stdio`: Use stdin/stdout for MCP communication
 - `-port`: Port to listen on (default: 8080, when not using stdio)
 
+### Claude Code PreToolUse Hook Mode
+
+`secure-shell` can also run as a Claude Code [PreToolUse hook](https://docs.claude.com/en/docs/claude-code/hooks) that validates `Bash` tool calls *before* they execute. The hook reads Claude Code's JSON payload from stdin, validates the command against the same allowlist used by the MCP server, and exits with code `2` to block the call (Claude Code surfaces stderr back to the model).
+
+```bash
+./bin/secure-shell -hook -config /path/to/config.json
+```
+
+Configure it in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/bin/secure-shell -hook -config /absolute/path/to/config.json"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Behavior:
+
+- `tool_name != "Bash"` → exit `0` (allow, no validation)
+- Command passes validation → exit `0`
+- Command denied → exit `2` with `Blocked by secure-shell-server: <reason>` on stderr
+
+The working directory is taken from `tool_input.cwd` / `cwd` in the JSON payload (or `-dir` if you pass it explicitly). No commands are executed and no files are written — validation only.
+
 ## Claude Desktop Setup
 
 To use secure-shell-server with Claude Desktop:
