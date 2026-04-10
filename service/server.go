@@ -328,7 +328,7 @@ func formatResults(results []commandResult) *mcp.CallToolResult {
 
 	for i, r := range results {
 		if len(results) > 1 {
-			fmt.Fprintf(&sb, "--- [%d] %s ---\n", i, r.command)
+			fmt.Fprintf(&sb, "--- [%d] ---\n", i)
 		}
 		if r.err != nil {
 			hasError = true
