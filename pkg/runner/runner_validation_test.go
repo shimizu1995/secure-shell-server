@@ -247,3 +247,51 @@ func TestSafeRunner_PipelineValidation(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// TestSafeRunner_DevNullRedirect tests that /dev/null can be used as a redirect target
+// when it is explicitly listed in allowedDirectories.
+func TestSafeRunner_DevNullRedirect(t *testing.T) {
+	cfg := setupCustomConfig()
+	cfg.AllowedDirectories = append(cfg.AllowedDirectories, "/dev/null")
+
+	log := logger.New()
+	validatorObj := validator.New(cfg, log)
+	safeRunner := New(cfg, validatorObj, log)
+	safeRunner.SetOutputs(io.Discard, io.Discard)
+
+	t.Run("StdoutRedirectToDevNull", func(t *testing.T) {
+		ctx := t.Context()
+		_, err := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
+		assert.NoError(t, err)
+	})
+
+	t.Run("StderrRedirectToDevNull", func(t *testing.T) {
+		ctx := t.Context()
+		_, err := safeRunner.RunCommand(ctx, "echo hello 2>/dev/null", "/tmp")
+		assert.NoError(t, err)
+	})
+
+	t.Run("BothRedirectToDevNull", func(t *testing.T) {
+		ctx := t.Context()
+		_, err := safeRunner.RunCommand(ctx, "echo hello >/dev/null 2>&1", "/tmp")
+		assert.NoError(t, err)
+	})
+}
+
+// TestSafeRunner_DevNullBlockedWhenNotConfigured tests that /dev/null is blocked
+// when it is not listed in allowedDirectories.
+func TestSafeRunner_DevNullBlockedWhenNotConfigured(t *testing.T) {
+	cfg := setupCustomConfig()
+	// /dev/null is NOT in allowedDirectories
+
+	log := logger.New()
+	validatorObj := validator.New(cfg, log)
+	safeRunner := New(cfg, validatorObj, log)
+	safeRunner.SetOutputs(io.Discard, io.Discard)
+
+	t.Run("RedirectToDevNullBlocked", func(t *testing.T) {
+		ctx := t.Context()
+		_, err := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
+		assert.Error(t, err)
+	})
+}
