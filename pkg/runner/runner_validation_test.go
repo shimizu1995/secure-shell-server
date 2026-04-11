@@ -261,20 +261,20 @@ func TestSafeRunner_DevNullRedirect(t *testing.T) {
 
 	t.Run("StdoutRedirectToDevNull", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	t.Run("StderrRedirectToDevNull", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello 2>/dev/null", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello 2>/dev/null", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	t.Run("BothRedirectToDevNull", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello >/dev/null 2>&1", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello >/dev/null 2>&1", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 }
 
@@ -291,7 +291,7 @@ func TestSafeRunner_DevNullBlockedWhenNotConfigured(t *testing.T) {
 
 	t.Run("RedirectToDevNullBlocked", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
-		assert.Error(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello > /dev/null", "/tmp")
+		assert.Error(t, result.Err)
 	})
 }
