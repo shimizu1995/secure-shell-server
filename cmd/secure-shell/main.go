@@ -79,12 +79,12 @@ func run() int {
 	}
 
 	// Execute the requested operation
-	var err error
+	var result runner.RunResult
 
 	switch {
 	case *scriptStr != "":
 		// Execute a script string
-		_, err = safeRunner.RunCommand(ctx, *scriptStr, *workingDir)
+		result = safeRunner.RunCommand(ctx, *scriptStr, *workingDir)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Error: No command or script specified\n")
@@ -92,7 +92,7 @@ func run() int {
 		return 1
 	}
 
-	if err != nil {
+	if err := result.Err; err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		return 1
 	}

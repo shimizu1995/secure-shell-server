@@ -289,11 +289,11 @@ func (s *Server) executeOne(ctx context.Context, command, workingDir string) com
 	buf := new(strings.Builder)
 	r.SetOutputs(buf, buf)
 
-	newDir, err := r.RunCommand(ctx, command, workingDir)
-	if err != nil {
-		s.logger.LogErrorf("Command execution failed: %v", err)
+	result := r.RunCommand(ctx, command, workingDir)
+	if result.Err != nil {
+		s.logger.LogErrorf("Command execution failed: %v", result.Err)
 	}
-	return commandResult{command: command, output: buf.String(), err: err, newWorkDir: newDir, hints: r.GetHints()}
+	return commandResult{command: command, output: buf.String(), err: result.Err, newWorkDir: result.NewWorkDir, hints: result.Hints}
 }
 
 // formatResultsWithHints builds a tool result from command results, appending any token-saving hints.
