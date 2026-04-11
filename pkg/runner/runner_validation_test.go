@@ -45,53 +45,53 @@ func TestSafeRunner_CommandValidation(t *testing.T) {
 	// 基本的な許可されたコマンド
 	t.Run("BasicAllowedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	// 複数行の許可されたコマンド
 	t.Run("MultilineAllowedCommands", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello\nls -l", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello\nls -l", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	// 明示的に拒否されたコマンド
 	t.Run("ExplicitlyDeniedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "rm -rf /tmp/test", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"rm\" is denied: Remove command is not allowed")
+		result := safeRunner.RunCommand(ctx, "rm -rf /tmp/test", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"rm\" is denied: Remove command is not allowed")
 	})
 
 	// 許可リストにないコマンド
 	t.Run("CommandNotInAllowList", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "chmod 777 file.txt", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"chmod\" is not permitted: Command not allowed by security policy")
+		result := safeRunner.RunCommand(ctx, "chmod 777 file.txt", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"chmod\" is not permitted: Command not allowed by security policy")
 	})
 
 	// コマンドの構文エラー
 	t.Run("SyntaxErrorInCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'unclosed string", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "parse error: ")
+		result := safeRunner.RunCommand(ctx, "echo 'unclosed string", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "parse error: ")
 	})
 
 	// リダイレクションを持つコマンド
 	t.Run("CommandWithRedirection", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo hello > /tmp/test.txt", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo hello > /tmp/test.txt", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	// 空のコマンド
 	t.Run("EmptyCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 }
 
@@ -105,24 +105,24 @@ func TestSafeRunner_AbsolutePathCommandNormalization(t *testing.T) {
 	// /usr/bin/rm should be blocked as "rm" (which is in denyCommands)
 	t.Run("AbsolutePathDeniedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "/bin/rm -rf /tmp/test", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"rm\" is denied")
+		result := safeRunner.RunCommand(ctx, "/bin/rm -rf /tmp/test", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"rm\" is denied")
 	})
 
 	// /bin/echo should be allowed as "echo" (which is in allowCommands)
 	t.Run("AbsolutePathAllowedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "/bin/echo hello", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "/bin/echo hello", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	// /usr/bin/wget should be blocked (not in allowCommands)
 	t.Run("AbsolutePathUnlistedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "/usr/bin/wget https://example.com", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"wget\" is not permitted")
+		result := safeRunner.RunCommand(ctx, "/usr/bin/wget https://example.com", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"wget\" is not permitted")
 	})
 }
 
@@ -142,17 +142,17 @@ func TestSafeRunner_CdDenyCommand(t *testing.T) {
 	// cd should be blocked when in denyCommands (deny takes precedence)
 	t.Run("CdBlockedWhenDenied", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"cd\" is denied")
+		result := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"cd\" is denied")
 	})
 
 	// cd in a chain should also be blocked
 	t.Run("CdInSerialCommandsBlockedWhenDenied", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "cd /tmp && echo hello", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"cd\" is denied")
+		result := safeRunner.RunCommand(ctx, "cd /tmp && echo hello", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"cd\" is denied")
 	})
 }
 
@@ -166,9 +166,9 @@ func TestSafeRunner_CdNotInAllowList(t *testing.T) {
 
 	t.Run("CdBlockedWhenNotInAllowList", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"cd\" is not permitted")
+		result := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"cd\" is not permitted")
 	})
 }
 
@@ -183,17 +183,17 @@ func TestSafeRunner_CdAllowed(t *testing.T) {
 
 	t.Run("CdWorksWhenInAllowList", func(t *testing.T) {
 		ctx := t.Context()
-		newDir, err := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "cd /tmp", "/tmp")
+		assert.NoError(t, result.Err)
 		expected, evalErr := filepath.EvalSymlinks("/tmp")
 		assert.NoError(t, evalErr)
-		assert.Equal(t, expected, newDir)
+		assert.Equal(t, expected, result.NewWorkDir)
 	})
 
 	t.Run("CdBlockedForDisallowedDirectory", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "cd /etc", "/tmp")
-		assert.Error(t, err)
+		result := safeRunner.RunCommand(ctx, "cd /etc", "/tmp")
+		assert.Error(t, result.Err)
 	})
 }
 
@@ -212,38 +212,38 @@ func TestSafeRunner_PipelineValidation(t *testing.T) {
 	// すべて許可されたコマンドのパイプライン
 	t.Run("AllAllowedCommands", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'hello' | grep hello", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo 'hello' | grep hello", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 
 	// 1つの拒否されたコマンドを含むパイプライン
 	t.Run("OneDisallowedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'hello world' | grep hello | sudo cat", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"sudo\" is denied")
+		result := safeRunner.RunCommand(ctx, "echo 'hello world' | grep hello | sudo cat", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"sudo\" is denied")
 	})
 
 	// 中間に拒否されたコマンドを含む複雑なパイプライン
 	t.Run("ComplexPipelineWithDisallowedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'test' | sudo grep test | cat", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"sudo\" is denied")
+		result := safeRunner.RunCommand(ctx, "echo 'test' | sudo grep test | cat", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"sudo\" is denied")
 	})
 
 	// 許可リストにないコマンドを含むパイプライン
 	t.Run("CommandNotInAllowlist", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'test' | grep test | awk '{print $1}'", "/tmp")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "command \"awk\" is not permitted")
+		result := safeRunner.RunCommand(ctx, "echo 'test' | grep test | awk '{print $1}'", "/tmp")
+		assert.Error(t, result.Err)
+		assert.Contains(t, result.Err.Error(), "command \"awk\" is not permitted")
 	})
 
 	// シンプルな許可されたコマンド
 	t.Run("SimpleAllowedCommand", func(t *testing.T) {
 		ctx := t.Context()
-		_, err := safeRunner.RunCommand(ctx, "echo 'single command'", "/tmp")
-		assert.NoError(t, err)
+		result := safeRunner.RunCommand(ctx, "echo 'single command'", "/tmp")
+		assert.NoError(t, result.Err)
 	})
 }
