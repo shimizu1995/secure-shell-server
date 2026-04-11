@@ -208,9 +208,10 @@ func (r *SafeRunner) secureOpenHandler(ctx context.Context, path string, flag in
 		absPath = resolved
 	}
 
-	// Check if file's directory is in the allowed list
-	fileDir := filepath.Dir(absPath)
-	allowed, msg := r.validator.IsDirectoryAllowed(fileDir)
+	// Check if the file path is within an allowed directory, or is itself an explicitly allowed path.
+	// Using IsPathInAllowedDirectory instead of IsDirectoryAllowed(fileDir) allows specific files
+	// like /dev/null to be permitted when listed in allowedDirectories.
+	allowed, msg := r.validator.IsPathInAllowedDirectory(absPath, "/")
 	if !allowed {
 		r.logger.LogErrorf("File access attempted outside allowed directories: %s", absPath)
 		return nil, &os.PathError{
