@@ -30,7 +30,7 @@ type SafeRunner struct {
 	// Output limiters to track truncation
 	stdoutLimiter *limiter.OutputLimiter
 	stderrLimiter *limiter.OutputLimiter
-	// Token-saving hints collected during command execution
+	// hints collected during command execution, returned via RunResult
 	hints []hint.Hint
 }
 
@@ -103,28 +103,31 @@ func (r *SafeRunner) GetTruncationDetails() (stdoutTruncated bool, stderrTruncat
 	return
 }
 
-// GetHints returns token-saving hints collected during command execution.
-func (r *SafeRunner) GetHints() []hint.Hint {
-	return r.hints
+// RunResult holds the result of a command execution.
+type RunResult struct {
+	// NewWorkDir is the new working directory if cd was used (empty if unchanged).
+	NewWorkDir string
+	// Hints contains token-saving suggestions collected during execution.
+	Hints []hint.Hint
+	// Err is the execution error, if any.
+	Err error
 }
 
 // RunCommand runs a shell command in the specified working directory.
 // It enforces security constraints by validating commands and file access.
-// It returns the new working directory if cd was used (empty string if unchanged),
-// and any execution error.
-func (r *SafeRunner) RunCommand(ctx context.Context, command string, workingDir string) (string, error) {
+func (r *SafeRunner) RunCommand(ctx context.Context, command string, workingDir string) RunResult {
 	// Get absolute path of the working directory
 	absWorkingDir, err := filepath.Abs(workingDir)
 	if err != nil {
 		r.logger.LogErrorf("Failed to get absolute path for working directory: %v", err)
-		return "", fmt.Errorf("failed to get absolute path for working directory: %w", err)
+		return RunResult{Err: fmt.Errorf("failed to get absolute path for working directory: %w", err)}
 	}
 
 	// Validate that the working directory is allowed
 	dirAllowed, dirMessage := r.validator.IsDirectoryAllowed(absWorkingDir)
 	if !dirAllowed {
 		r.logger.LogErrorf("Directory validation failed: %s", dirMessage)
-		return "", fmt.Errorf("directory validation failed: %s", dirMessage)
+		return RunResult{Err: fmt.Errorf("directory validation failed: %s", dirMessage)}
 	}
 
 	// Parse the command
@@ -132,7 +135,7 @@ func (r *SafeRunner) RunCommand(ctx context.Context, command string, workingDir 
 	prog, err := parser.Parse(strings.NewReader(command), "")
 	if err != nil {
 		r.logger.LogErrorf("Parse error: %v", err)
-		return "", fmt.Errorf("parse error: %w", err)
+		return RunResult{Err: fmt.Errorf("parse error: %w", err)}
 	}
 
 	// Create a timeout context if MaxExecutionTime is set
@@ -185,11 +188,11 @@ func (r *SafeRunner) RunCommand(ctx context.Context, command string, workingDir 
 	)
 	if err != nil {
 		r.logger.LogErrorf("Interpreter creation error: %v", err)
-		return "", fmt.Errorf("interpreter creation error: %w", err)
+		return RunResult{Err: fmt.Errorf("interpreter creation error: %w", err)}
 	}
 
 	err = interpRunner.Run(ctx, prog)
-	return lastCdDir, err
+	return RunResult{NewWorkDir: lastCdDir, Hints: r.hints, Err: err}
 }
 
 // secureOpenHandler validates file access against allowed directories before opening.
@@ -271,10 +274,12 @@ func (r *SafeRunner) collectHints(cmd string, args []string, workingDir string) 
 	prefix := cleanWorking + string(filepath.Separator)
 
 	// Check for redundant cd (cd to current working directory)
+	redundantCdTarget := ""
 	if cmd == "cd" && len(args) > 1 {
 		target := args[1]
 		cleanTarget := filepath.Clean(target)
 		if filepath.IsAbs(cleanTarget) && cleanTarget == cleanWorking {
+			redundantCdTarget = cleanTarget
 			r.hints = append(r.hints, hint.Hint{
 				Type: hint.RedundantCd,
 				Message: fmt.Sprintf(
@@ -286,11 +291,24 @@ func (r *SafeRunner) collectHints(cmd string, args []string, workingDir string) 
 	}
 
 	// Check for absolute paths that could be relative
+	seen := make(map[string]bool)
 	for _, arg := range args {
 		if !filepath.IsAbs(arg) {
 			continue
 		}
 		cleanArg := filepath.Clean(arg)
+
+		// Skip if already covered by redundant cd hint
+		if cleanArg == redundantCdTarget {
+			continue
+		}
+
+		// Skip duplicates
+		if seen[cleanArg] {
+			continue
+		}
+		seen[cleanArg] = true
+
 		var relPath string
 		switch {
 		case cleanArg == cleanWorking:
