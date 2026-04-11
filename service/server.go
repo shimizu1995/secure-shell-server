@@ -232,7 +232,15 @@ func (s *Server) HandleRunCommand(ctx context.Context, request mcp.CallToolReque
 }
 
 // parseCommands extracts and validates the commands array from the request arguments.
+// If a single string is provided instead of an array, it is treated as a one-element array.
 func parseCommands(raw interface{}) ([]string, error) {
+	// Accept a bare string as a single-element array.
+	if s, ok := raw.(string); ok {
+		if s == "" {
+			return nil, errors.New("commands parameter must be a non-empty string or array of strings")
+		}
+		return []string{s}, nil
+	}
 	arr, ok := raw.([]interface{})
 	if !ok || len(arr) == 0 {
 		return nil, errors.New("commands parameter must be a non-empty array of strings")
