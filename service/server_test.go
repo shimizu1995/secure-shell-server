@@ -321,6 +321,26 @@ func TestRunCommand(t *testing.T) {
 		assertToolError(t, result, "non-empty string")
 	})
 
+	t.Run("single string instead of array succeeds", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": "echo hello",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertToolSuccess(t, result, "hello")
+	})
+
+	t.Run("empty single string instead of array fails", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": "",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertToolError(t, result, "non-empty")
+	})
+
 	t.Run("directory persists across calls", func(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
