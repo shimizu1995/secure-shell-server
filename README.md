@@ -41,11 +41,23 @@ The binaries will be available in the `bin/` directory.
 ./bin/server -config=/path/to/config.json
 ```
 
+Or via environment variable:
+
+```bash
+MCP_SHELL_SERVER_CONFIG=/path/to/config.json ./bin/server
+```
+
+The configuration file path is required. If neither `-config` nor `MCP_SHELL_SERVER_CONFIG` is provided, the server exits with an error. When both are set, `-config` takes precedence.
+
 ### Command-Line Options for server
 
-- `-config`: Path to configuration file
+- `-config`: Path to configuration file (overrides `MCP_SHELL_SERVER_CONFIG`)
 - `-stdio`: Use stdin/stdout for MCP communication
 - `-port`: Port to listen on (default: 8080, when not using stdio)
+
+### Environment Variables
+
+- `MCP_SHELL_SERVER_CONFIG`: Path to configuration file. Used when `-config` is not specified.
 
 ## Claude Desktop Setup
 
@@ -63,6 +75,17 @@ To use secure-shell-server with Claude Desktop:
     "-config",
     "~/path/to/your/config.json"
   ]
+}
+```
+
+Alternatively, supply the path via environment variable:
+
+```json
+"shell": {
+  "command": "/path/to/secure-shell-server/bin/server",
+  "env": {
+    "MCP_SHELL_SERVER_CONFIG": "~/path/to/your/config.json"
+  }
 }
 ```
 
