@@ -49,7 +49,7 @@ The binaries will be available in the `bin/` directory.
 
 ### Claude Code PreToolUse Hook Mode
 
-`secure-shell` can also run as a Claude Code [PreToolUse hook](https://docs.claude.com/en/docs/claude-code/hooks) that validates `Bash` tool calls *before* they execute. The hook reads Claude Code's JSON payload from stdin, validates the command against the same allowlist used by the MCP server, and exits with code `2` to block the call (Claude Code surfaces stderr back to the model).
+`secure-shell` can also run as a Claude Code [PreToolUse hook](https://code.claude.com/docs/en/hooks) that validates `Bash` tool calls *before* they execute. The hook reads Claude Code's JSON payload from stdin, validates the command against the same allowlist used by the MCP server, and exits with code `2` to block the call (Claude Code surfaces stderr back to the model).
 
 ```bash
 ./bin/secure-shell -hook -config /path/to/config.json
@@ -102,8 +102,8 @@ To use secure-shell-server with Claude Desktop:
 }
 ```
 
-3. Create a configuration file at a location of your choice (such as `~/.mcp_shell_config.json` on macOS or appropriate path on Windows) with your desired settings
-4. Restart Claude Desktop to apply the changes
+1. Create a configuration file at a location of your choice (such as `~/.mcp_shell_config.json` on macOS or appropriate path on Windows) with your desired settings
+2. Restart Claude Desktop to apply the changes
 
 ## MCP Tools
 
@@ -113,10 +113,10 @@ The server exposes two MCP tools:
 
 Run one or more shell commands in the current working directory. Only allowed commands within allowed paths are permitted. Use the `cd` command to change directories (only within `allowedDirectories`). Directory changes from `cd` persist across subsequent `run` calls.
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `commands` | Yes | List of commands to execute. Use `cd` to change directories within allowed paths. |
-| `mode` | No | `"parallel"` (default) or `"serial"` |
+| Parameter  | Required | Description                                                                       |
+| ---------- | -------- | --------------------------------------------------------------------------------- |
+| `commands` | Yes      | List of commands to execute. Use `cd` to change directories within allowed paths. |
+| `mode`     | No       | `"parallel"` (default) or `"serial"`                                              |
 
 ### `pwd`
 
@@ -151,22 +151,24 @@ The security policy is defined in a JSON configuration file. This section explai
 }
 ```
 
-| Field | Description | Default |
-|---|---|---|
-| `allowedDirectories` | Directories where commands can operate | None (required) |
-| `allowCommands` | List of allowed commands | `[]` |
-| `denyCommands` | List of denied commands | `[]` |
-| `defaultErrorMessage` | Default message when command is denied | `""` |
-| `maxExecutionTime` | Maximum execution time in seconds. `0` for unlimited | `120` |
-| `maxOutputSize` | Maximum output size in bytes. `0` for unlimited | `51200` |
+| Field                 | Description                                          | Default         |
+| --------------------- | ---------------------------------------------------- | --------------- |
+| `allowedDirectories`  | Directories where commands can operate               | None (required) |
+| `allowCommands`       | List of allowed commands                             | `[]`            |
+| `denyCommands`        | List of denied commands                              | `[]`            |
+| `defaultErrorMessage` | Default message when command is denied               | `""`            |
+| `maxExecutionTime`    | Maximum execution time in seconds. `0` for unlimited | `120`           |
+| `maxOutputSize`       | Maximum output size in bytes. `0` for unlimited      | `51200`         |
 
 ### Subcommand Validation
 
 Commands can specify allowed subcommands. Each subcommand can be:
+
 - A simple string (bare subcommand name)
 - A full object with additional restrictions
 
 **Simple subcommand:**
+
 ```json
 {
   "command": "git",
@@ -179,6 +181,7 @@ Commands can specify allowed subcommands. Each subcommand can be:
 You can deny specific flags on commands and subcommands at any nesting level. This is useful for preventing dangerous operations like force-push or force-recreate.
 
 **Example: Deny dangerous flags on git push**
+
 ```json
 {
   "command": "git",
@@ -199,6 +202,7 @@ When a user runs `git push -f`, the command will be blocked with the custom mess
 Subcommands can be nested to arbitrary depth, each with its own `denyFlags`. This allows fine-grained control over deeply nested command structures.
 
 **Example: Recursive Docker Compose validation**
+
 ```json
 {
   "command": "docker",
@@ -238,6 +242,7 @@ You can also explicitly deny specific subcommands using `denySubCommands`:
 ### Complete Configuration Example
 
 See `sample-config.json` for a comprehensive example covering:
+
 - Simple allowed commands
 - Commands with subcommand restrictions
 - Subcommands with `denyFlags`
