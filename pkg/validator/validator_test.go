@@ -69,6 +69,37 @@ func TestIsPathInAllowedDirectory(t *testing.T) {
 		{name: "EscapeAttempt", path: filepath.Join(tempWorkDir, "..", "etc", "passwd"), baseDir: tempHomeDir, allowed: false, wantError: true},
 	}
 
+	// Separate test for /dev/null as a specific allowed path (not a directory)
+	t.Run("DevNullAllowedWhenConfigured", func(t *testing.T) {
+		devNullCfg := &config.ShellCommandConfig{
+			AllowedDirectories:  []string{tempHomeDir, "/dev/null"},
+			DefaultErrorMessage: "Path not allowed by security policy",
+		}
+		var buf bytes.Buffer
+		devNullLog := logger.NewWithWriter(&buf)
+		devNullV := New(devNullCfg, devNullLog)
+
+		allowed, errMsg := devNullV.IsPathInAllowedDirectory("/dev/null", tempWorkDir)
+		if !allowed {
+			t.Errorf("IsPathInAllowedDirectory(/dev/null) should be allowed when /dev/null is in allowedDirectories, got error: %s", errMsg)
+		}
+	})
+
+	t.Run("DevNullBlockedWhenNotConfigured", func(t *testing.T) {
+		noDevNullCfg := &config.ShellCommandConfig{
+			AllowedDirectories:  []string{tempHomeDir, tempWorkDir},
+			DefaultErrorMessage: "Path not allowed by security policy",
+		}
+		var buf bytes.Buffer
+		noDevNullLog := logger.NewWithWriter(&buf)
+		noDevNullV := New(noDevNullCfg, noDevNullLog)
+
+		allowed, _ := noDevNullV.IsPathInAllowedDirectory("/dev/null", tempWorkDir)
+		if allowed {
+			t.Error("IsPathInAllowedDirectory(/dev/null) should be blocked when /dev/null is not in allowedDirectories")
+		}
+	})
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset log buffer for each test

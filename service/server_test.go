@@ -321,6 +321,26 @@ func TestRunCommand(t *testing.T) {
 		assertToolError(t, result, "non-empty string")
 	})
 
+	t.Run("single string instead of array succeeds", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": "echo hello",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertToolSuccess(t, result, "hello")
+	})
+
+	t.Run("empty single string instead of array fails", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": "",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		assertToolError(t, result, "non-empty")
+	})
+
 	t.Run("directory persists across calls", func(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
@@ -480,6 +500,59 @@ func TestUseEnvPwd(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		assertToolError(t, result, "No working directory set")
+	})
+}
+
+func TestTokenSavingHints(t *testing.T) {
+	srv, tmpDir := newTestServer(t)
+	ctx := t.Context()
+
+	// Set working directory first
+	_, _ = srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+		"commands": []interface{}{"cd " + tmpDir},
+		"mode":     "serial",
+	}))
+
+	t.Run("redundant cd shows hint", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": []interface{}{"cd " + tmpDir + " && echo hello"},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text := extractText(result)
+		if !strings.Contains(text, "[Hint]") {
+			t.Fatalf("expected hint in output, got: %s", text)
+		}
+		if !strings.Contains(text, "unnecessary") {
+			t.Fatalf("expected redundant cd hint, got: %s", text)
+		}
+	})
+
+	t.Run("absolute path shows hint", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": []interface{}{"echo " + tmpDir},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text := extractText(result)
+		if !strings.Contains(text, "[Hint]") {
+			t.Fatalf("expected hint in output, got: %s", text)
+		}
+	})
+
+	t.Run("no hint when not needed", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": []interface{}{"echo hello"},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text := extractText(result)
+		if strings.Contains(text, "[Hint]") {
+			t.Fatalf("did not expect hint, got: %s", text)
+		}
 	})
 }
 

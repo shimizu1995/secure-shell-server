@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/shimizu1995/secure-shell-server/pkg/config"
+	"github.com/shimizu1995/secure-shell-server/pkg/hint"
 	"github.com/shimizu1995/secure-shell-server/pkg/logger"
 	"github.com/shimizu1995/secure-shell-server/pkg/runner"
 	"github.com/shimizu1995/secure-shell-server/pkg/validator"
@@ -167,6 +168,7 @@ type commandResult struct {
 	output     string
 	err        error
 	newWorkDir string // non-empty if cd changed the working directory
+	hints      []hint.Hint
 }
 
 // HandleRunCommand handles the run tool execution.
@@ -220,11 +222,25 @@ func (s *Server) HandleRunCommand(ctx context.Context, request mcp.CallToolReque
 		}
 	}
 
-	return formatResults(results), nil
+	// Collect token-saving hints from runner results
+	var allHints []hint.Hint
+	for _, r := range results {
+		allHints = append(allHints, r.hints...)
+	}
+
+	return formatResultsWithHints(results, allHints), nil
 }
 
 // parseCommands extracts and validates the commands array from the request arguments.
+// If a single string is provided instead of an array, it is treated as a one-element array.
 func parseCommands(raw interface{}) ([]string, error) {
+	// Accept a bare string as a single-element array.
+	if s, ok := raw.(string); ok {
+		if s == "" {
+			return nil, errors.New("commands parameter must be a non-empty string or array of strings")
+		}
+		return []string{s}, nil
+	}
 	arr, ok := raw.([]interface{})
 	if !ok || len(arr) == 0 {
 		return nil, errors.New("commands parameter must be a non-empty array of strings")
@@ -281,11 +297,36 @@ func (s *Server) executeOne(ctx context.Context, command, workingDir string) com
 	buf := new(strings.Builder)
 	r.SetOutputs(buf, buf)
 
-	newDir, err := r.RunCommand(ctx, command, workingDir)
-	if err != nil {
-		s.logger.LogErrorf("Command execution failed: %v", err)
+	result := r.RunCommand(ctx, command, workingDir)
+	if result.Err != nil {
+		s.logger.LogErrorf("Command execution failed: %v", result.Err)
 	}
-	return commandResult{command: command, output: buf.String(), err: err, newWorkDir: newDir}
+	return commandResult{command: command, output: buf.String(), err: result.Err, newWorkDir: result.NewWorkDir, hints: result.Hints}
+}
+
+// formatResultsWithHints builds a tool result from command results, appending any token-saving hints.
+func formatResultsWithHints(results []commandResult, hints []hint.Hint) *mcp.CallToolResult {
+	result := formatResults(results)
+
+	if len(hints) == 0 {
+		return result
+	}
+
+	// Append hints to the existing text content
+	var hintText strings.Builder
+	hintText.WriteString("\n\n")
+	for _, h := range hints {
+		hintText.WriteString(h.Message)
+		hintText.WriteString("\n")
+	}
+
+	// The result content is []mcp.Content; append a new text block
+	result.Content = append(result.Content, mcp.TextContent{
+		Type: "text",
+		Text: hintText.String(),
+	})
+
+	return result
 }
 
 // formatResults builds a tool result from command results.
@@ -295,7 +336,7 @@ func formatResults(results []commandResult) *mcp.CallToolResult {
 
 	for i, r := range results {
 		if len(results) > 1 {
-			fmt.Fprintf(&sb, "--- [%d] %s ---\n", i, r.command)
+			fmt.Fprintf(&sb, "--- [%d] ---\n", i)
 		}
 		if r.err != nil {
 			hasError = true
