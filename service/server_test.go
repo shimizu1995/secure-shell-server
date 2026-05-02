@@ -554,6 +554,26 @@ func TestTokenSavingHints(t *testing.T) {
 			t.Fatalf("did not expect hint, got: %s", text)
 		}
 	})
+
+	t.Run("duplicate hints across commands are deduplicated", func(t *testing.T) {
+		result, err := srv.HandleRunCommand(ctx, makeToolRequest(map[string]interface{}{
+			"commands": []interface{}{
+				"cd " + tmpDir + " && echo a",
+				"cd " + tmpDir + " && echo b",
+				"cd " + tmpDir + " && echo c",
+				"cd " + tmpDir + " && echo d",
+			},
+			"mode": "serial",
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text := extractText(result)
+		got := strings.Count(text, "is unnecessary")
+		if got != 1 {
+			t.Fatalf("expected exactly 1 redundant cd hint after dedup, got %d in:\n%s", got, text)
+		}
+	})
 }
 
 func assertToolError(t *testing.T, result *mcp.CallToolResult, contains string) {

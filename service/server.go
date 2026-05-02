@@ -222,11 +222,14 @@ func (s *Server) HandleRunCommand(ctx context.Context, request mcp.CallToolReque
 		}
 	}
 
-	// Collect token-saving hints from runner results
+	// Collect token-saving hints from runner results, deduplicating identical
+	// suggestions that arise when multiple commands share the same redundant
+	// pattern (e.g. each chained command starting with the same `cd`).
 	var allHints []hint.Hint
 	for _, r := range results {
 		allHints = append(allHints, r.hints...)
 	}
+	allHints = hint.Dedupe(allHints)
 
 	return formatResultsWithHints(results, allHints), nil
 }
