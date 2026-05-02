@@ -118,10 +118,6 @@ func TestIsPathInAllowedDirectory(t *testing.T) {
 	}
 }
 
-// TestIsPathInAllowedDirectory_EmptyVarHint verifies that when a denied path
-// looks like the result of expanding an empty/unset variable (a single-segment
-// absolute path such as "/file.log"), the error message includes a hint that
-// guides the user toward ${VAR:-default} or setting the variable explicitly.
 func TestIsPathInAllowedDirectory_EmptyVarHint(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := &config.ShellCommandConfig{
@@ -132,12 +128,14 @@ func TestIsPathInAllowedDirectory_EmptyVarHint(t *testing.T) {
 	log := logger.NewWithWriter(&buf)
 	v := New(cfg, log)
 
+	const hintMarker = `"${VAR:-/tmp}"`
+
 	t.Run("SingleSegmentAbsolutePathIncludesHint", func(t *testing.T) {
 		allowed, msg := v.IsPathInAllowedDirectory("/allowlist_proxy.test.log", tempDir)
 		if allowed {
 			t.Fatalf("expected /allowlist_proxy.test.log to be denied")
 		}
-		if !strings.Contains(msg, "single-segment absolute path") || !strings.Contains(msg, "${VAR:-/tmp}") {
+		if !strings.Contains(msg, hintMarker) {
 			t.Errorf("expected env-var hint in error, got: %s", msg)
 		}
 	})
@@ -147,7 +145,7 @@ func TestIsPathInAllowedDirectory_EmptyVarHint(t *testing.T) {
 		if allowed {
 			t.Fatalf("expected /etc/passwd to be denied")
 		}
-		if strings.Contains(msg, "single-segment absolute path") {
+		if strings.Contains(msg, hintMarker) {
 			t.Errorf("did not expect env-var hint for multi-segment path, got: %s", msg)
 		}
 	})

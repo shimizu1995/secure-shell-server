@@ -74,18 +74,12 @@ func TestSafeRunner_ValidateScript_DirectoryNotAllowed(t *testing.T) {
 	assert.Contains(t, err.Error(), "directory validation failed")
 }
 
-// TestSafeRunner_ValidateScript_UnsetVariable verifies that when a script
-// references an environment variable that is not set in the validator process,
-// the error clearly identifies the unbound variable instead of producing the
-// confusing "path \"/foo\" is outside of allowed directories" message that
-// results when "$UNSET/foo" silently expands to "/foo".
 func TestSafeRunner_ValidateScript_UnsetVariable(t *testing.T) {
 	cfg := setupCustomConfig()
 	log := logger.New()
 	validatorObj := validator.New(cfg, log)
 	safeRunner := New(cfg, validatorObj, log)
 
-	// Make sure the variable is genuinely unset for this test.
 	const varName = "SECURE_SHELL_TEST_UNSET_VAR_XYZ"
 	t.Setenv(varName, "")
 	_ = os.Unsetenv(varName)
@@ -97,9 +91,6 @@ func TestSafeRunner_ValidateScript_UnsetVariable(t *testing.T) {
 	assert.Contains(t, err.Error(), varName)
 }
 
-// TestSafeRunner_ValidateScript_DefaultExpansionAllowed verifies that the
-// recommended workaround (${VAR:-default}) keeps the script valid even when
-// VAR is unset.
 func TestSafeRunner_ValidateScript_DefaultExpansionAllowed(t *testing.T) {
 	cfg := setupCustomConfig()
 	log := logger.New()
