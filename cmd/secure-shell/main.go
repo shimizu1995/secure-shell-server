@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -22,6 +24,7 @@ func main() {
 func run() int {
 	// Define command-line flags
 	scriptStr := flag.String("script", "", "Script string to execute")
+	hookMode := flag.Bool("hook", false, "Run as a Claude Code PreToolUse hook: read JSON from stdin and validate the Bash command without executing it")
 	maxTime := flag.Int("timeout", config.DefaultExecutionTimeout, "Maximum execution time in seconds")
 	workingDir := flag.String("dir", "", "Working directory for command execution")
 	logPath := flag.String("log", "", "Path to the log file (if empty, no logging occurs)")
@@ -82,6 +85,9 @@ func run() int {
 	var result runner.RunResult
 
 	switch {
+	case *hookMode:
+		return runHookMode(ctx, safeRunner, *workingDir, os.Stdin, os.Stderr)
+
 	case *scriptStr != "":
 		// Execute a script string
 		result = safeRunner.RunCommand(ctx, *scriptStr, *workingDir)
@@ -97,5 +103,65 @@ func run() int {
 		return 1
 	}
 
+	return 0
+}
+
+// hookInput is the JSON payload Claude Code sends to PreToolUse hooks.
+type hookInput struct {
+	ToolName  string `json:"tool_name"`
+	ToolInput struct {
+		Command string `json:"command"`
+		Cwd     string `json:"cwd"`
+	} `json:"tool_input"`
+	Cwd string `json:"cwd"`
+}
+
+// runHookMode reads a Claude Code PreToolUse hook payload from stdin, validates
+// the Bash command against the configured allowlist, and exits with code 2 if
+// the command is denied (which causes Claude Code to block the tool call and
+// surface the stderr message back to the model).
+func runHookMode(ctx context.Context, safeRunner *runner.SafeRunner, workingDir string, stdin io.Reader, stderr io.Writer) int {
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "hook: failed to read stdin: %v\n", err)
+		return 1
+	}
+
+	var input hookInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		fmt.Fprintf(stderr, "hook: failed to parse stdin JSON: %v\n", err)
+		return 1
+	}
+
+	// Only validate Bash tool calls; allow any other tool through.
+	if input.ToolName != "Bash" {
+		return 0
+	}
+
+	command := input.ToolInput.Command
+	if command == "" {
+		return 0
+	}
+
+	dir := workingDir
+	if dir == "" {
+		dir = input.ToolInput.Cwd
+	}
+	if dir == "" {
+		dir = input.Cwd
+	}
+	if dir == "" {
+		if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+			dir = cwd
+		}
+	}
+
+	// hookBlockExitCode is the exit code Claude Code interprets as "block this
+	// tool call and surface stderr to the model" for PreToolUse hooks.
+	const hookBlockExitCode = 2
+	if err := safeRunner.ValidateScript(ctx, command, dir); err != nil {
+		fmt.Fprintf(stderr, "Blocked by secure-shell-server: %v\n", err)
+		return hookBlockExitCode
+	}
 	return 0
 }
