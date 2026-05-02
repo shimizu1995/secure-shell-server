@@ -99,7 +99,27 @@ func (v *CommandValidator) IsPathInAllowedDirectory(path string, baseDir string)
 		}
 	}
 
-	return false, fmt.Sprintf("path %q is outside of allowed directories: %s", path, v.config.DefaultErrorMessage)
+	msg := fmt.Sprintf("path %q is outside of allowed directories: %s", path, v.config.DefaultErrorMessage)
+	if looksLikeEmptyVarPrefix(path) {
+		msg += " (hint: this single-segment absolute path looks like the result of expanding an empty/unset variable, e.g. \"$VAR/file\" with VAR=\"\"; use \"${VAR:-/tmp}\" or set VAR explicitly)"
+	}
+	return false, msg
+}
+
+// looksLikeEmptyVarPrefix reports whether path looks like the result of an
+// empty variable expansion such as "$EMPTY/file.log" → "/file.log". It returns
+// true when path starts with exactly one slash and contains no further slashes
+// (i.e., a single-segment absolute path), which almost never matches a real
+// directory and very often indicates a missing environment variable.
+func looksLikeEmptyVarPrefix(path string) bool {
+	if !strings.HasPrefix(path, "/") {
+		return false
+	}
+	rest := path[1:]
+	if rest == "" {
+		return false
+	}
+	return !strings.Contains(rest, "/")
 }
 
 // resolveSymlinksPath resolves symlinks in a path.

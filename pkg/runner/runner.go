@@ -260,10 +260,22 @@ func (r *SafeRunner) ValidateScript(ctx context.Context, command string, working
 		return discardRWC{}, nil
 	}
 
+	// Capture interpreter stderr so we can detect "unbound variable" errors
+	// raised by `set -u` (nounset). The mvdan.cc/sh interpreter handles
+	// expand.UnsetParameterError internally — it prints the error to stderr
+	// and returns a generic "exit status 1", so we have to inspect the
+	// captured output to surface a useful message to the caller.
+	var stderrBuf strings.Builder
+
 	interpRunner, err := interp.New(
+		// Enable `set -u` (nounset) so that expanding an unset variable raises
+		// a clear "unbound variable" error rather than silently expanding to ""
+		// (which would otherwise turn `$UNSET/foo` into `/foo` and produce a
+		// misleading "outside of allowed directories" error during path checks).
+		interp.Params("-u"),
 		interp.CallHandler(callFunc),
 		interp.ExecHandlers(func(_ interp.ExecHandlerFunc) interp.ExecHandlerFunc { return noopExec }),
-		interp.StdIO(nil, io.Discard, io.Discard),
+		interp.StdIO(nil, io.Discard, &stderrBuf),
 		interp.Env(nil),
 		interp.Dir(absWorkingDir),
 		interp.OpenHandler(validateOnlyOpen),
@@ -273,9 +285,33 @@ func (r *SafeRunner) ValidateScript(ctx context.Context, command string, working
 	}
 
 	if err := interpRunner.Run(ctx, prog); err != nil {
+		if name, ok := extractUnboundVarName(stderrBuf.String()); ok {
+			return fmt.Errorf(
+				"unbound variable %q: this variable is not set in the validator's environment, "+
+					"so its expansion would silently become an empty string. "+
+					"Either set %s before invoking the secure-shell hook, "+
+					"or rewrite the script to provide a default such as ${%s:-/tmp}",
+				name, name, name,
+			)
+		}
 		return err
 	}
 	return nil
+}
+
+// extractUnboundVarName parses the stderr output from the mvdan.cc/sh
+// interpreter for an "unbound variable" message produced by `set -u` (nounset)
+// and returns the variable name. The expand package writes the error in the
+// form "<NAME>: unbound variable\n".
+func extractUnboundVarName(stderr string) (string, bool) {
+	const suffix = ": unbound variable"
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if name, found := strings.CutSuffix(line, suffix); found && name != "" {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // discardRWC is an io.ReadWriteCloser that discards writes and returns EOF on read.
