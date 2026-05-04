@@ -262,6 +262,46 @@ You can also explicitly deny specific subcommands using `denySubCommands`:
 }
 ```
 
+### Global Flags (globalFlags / denyGlobalFlags)
+
+Some commands accept flags that appear *before* the subcommand, such as
+`git -C /path status` or `git --no-pager log`. Without `globalFlags`, those
+leading flags would be treated as unknown subcommands and rejected.
+
+`globalFlags` is a list of flag specs. Each entry can be a string (flag name
+only, no value) or an object with `takesValue: true` for flags that consume
+the next argument as their value (e.g., `-C <path>`). Both `--name value` and
+`--name=value` forms are recognized. Path-bearing values like the `<path>`
+in `-C <path>` are still validated against `allowedDirectories`.
+
+```json
+{
+  "command": "git",
+  "globalFlags": [
+    "--no-pager",
+    { "name": "-C", "takesValue": true },
+    { "name": "--git-dir", "takesValue": true }
+  ],
+  "subCommands": ["status", "log"]
+}
+```
+
+This allows `git -C /tmp/repo status` and `git --no-pager log`.
+
+`denyGlobalFlags` blocks specific flags wherever they appear in the argument
+list (not only at the leading position). Use it to block dangerous global
+flags such as `--exec-path` or `--upload-pack`.
+
+```json
+{
+  "command": "git",
+  "denyGlobalFlags": [
+    "--exec-path",
+    { "name": "--upload-pack", "message": "Custom upload-pack is not allowed" }
+  ]
+}
+```
+
 ### Complete Configuration Example
 
 See `sample-config.json` for a comprehensive example covering:
@@ -270,6 +310,7 @@ See `sample-config.json` for a comprehensive example covering:
 - Commands with subcommand restrictions
 - Subcommands with `denyFlags`
 - Nested subcommands (e.g., `docker compose`)
+- Global flags before subcommands (e.g., `git -C <path>`)
 - Explicit denied commands with custom messages
 
 ## Design and Implementation

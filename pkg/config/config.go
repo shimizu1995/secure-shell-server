@@ -48,11 +48,41 @@ func (r *SubCommandRule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// GlobalFlag represents a flag that can appear before any subcommand
+// (e.g. `git -C /path status`). It is used in both the allow and deny lists
+// at the AllowCommand level so that callers can permit value-bearing flags
+// like `-C <path>` or block dangerous ones like `--exec-path` regardless
+// of the subcommand that follows.
+type GlobalFlag struct {
+	Name       string `json:"name"`
+	TakesValue bool   `json:"takesValue,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
+// UnmarshalJSON accepts either a JSON string (treated as name only) or a full object.
+func (g *GlobalFlag) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		g.Name = name
+		return nil
+	}
+
+	type globalFlagAlias GlobalFlag
+	var alias globalFlagAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*g = GlobalFlag(alias)
+	return nil
+}
+
 // AllowCommand represents a command that is explicitly allowed with optional subcommand specifications.
 type AllowCommand struct {
 	Command         string           `json:"command"`
 	SubCommands     []SubCommandRule `json:"subCommands,omitempty"`
 	DenySubCommands []string         `json:"denySubCommands,omitempty"`
+	GlobalFlags     []GlobalFlag     `json:"globalFlags,omitempty"`
+	DenyGlobalFlags []GlobalFlag     `json:"denyGlobalFlags,omitempty"`
 }
 
 // ShellCommandConfig holds the configuration for shell command permissions.

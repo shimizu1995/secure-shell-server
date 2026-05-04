@@ -199,6 +199,44 @@ Claude Desktop で secure-shell-server を使用するには：
 }
 ```
 
+### グローバルフラグ (globalFlags / denyGlobalFlags)
+
+`git -C /path status` や `git --no-pager log` のように、サブコマンド *より前* に
+置かれるフラグを許可するには `globalFlags` を使います。設定しない場合、これら
+先頭のフラグは未知のサブコマンドとして扱われ拒否されます。
+
+`globalFlags` の各エントリは文字列（値なしフラグ）または `{name, takesValue}`
+形式のオブジェクトを取れます。`takesValue: true` のフラグは次の引数を値として
+消費します（`-C <path>` 形式と `-C=<path>` の両方を認識）。値が `<path>` の
+場合は既存の `allowedDirectories` 検証で許可ディレクトリ外なら弾かれます。
+
+```json
+{
+  "command": "git",
+  "globalFlags": [
+    "--no-pager",
+    { "name": "-C", "takesValue": true },
+    { "name": "--git-dir", "takesValue": true }
+  ],
+  "subCommands": ["status", "log"]
+}
+```
+
+これにより `git -C /tmp/repo status` や `git --no-pager log` が通ります。
+
+`denyGlobalFlags` は引数列のどこに現れてもブロックします（先頭限定ではない）。
+`--exec-path` や `--upload-pack` のような危険なグローバルフラグの遮断に使用します。
+
+```json
+{
+  "command": "git",
+  "denyGlobalFlags": [
+    "--exec-path",
+    { "name": "--upload-pack", "message": "Custom upload-pack is not allowed" }
+  ]
+}
+```
+
 ### 完全な設定例
 
 以下をカバーする包括的な例は `sample-config.json` を参照してください：
@@ -206,6 +244,7 @@ Claude Desktop で secure-shell-server を使用するには：
 - サブコマンド制限付きコマンド
 - `denyFlags` 付きサブコマンド
 - ネストされたサブコマンド（例：`docker compose`）
+- サブコマンド前のグローバルフラグ（例：`git -C <path>`）
 - カスタムメッセージ付きの明示的な拒否コマンド
 
 ## 設計と実装

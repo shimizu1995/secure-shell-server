@@ -10,6 +10,17 @@
     "tail",
     {
       "command": "git",
+      "globalFlags": [
+        "--no-pager",
+        "--bare",
+        { "name": "-C", "takesValue": true },
+        { "name": "--git-dir", "takesValue": true },
+        { "name": "--work-tree", "takesValue": true }
+      ],
+      "denyGlobalFlags": [
+        { "name": "--exec-path", "message": "Custom git exec-path is not allowed" },
+        { "name": "--upload-pack", "message": "Custom upload-pack is not allowed" }
+      ],
       "subCommands": [
         "status",
         "pull",

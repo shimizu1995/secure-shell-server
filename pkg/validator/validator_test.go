@@ -519,6 +519,147 @@ func TestDenyFlagsCombinedShortFlags(t *testing.T) {
 	}
 }
 
+// TestValidateCommandWithGlobalFlags tests that globalFlags allow flags before subcommand
+// and denyGlobalFlags block flags anywhere in args.
+func TestValidateCommandWithGlobalFlags(t *testing.T) {
+	cfg := &config.ShellCommandConfig{
+		AllowedDirectories: []string{"/home", "/tmp", "/opt/src"},
+		AllowCommands: []config.AllowCommand{
+			{
+				Command: "git",
+				GlobalFlags: []config.GlobalFlag{
+					{Name: "--no-pager"},
+					{Name: "-C", TakesValue: true},
+					{Name: "--git-dir", TakesValue: true},
+				},
+				DenyGlobalFlags: []config.GlobalFlag{
+					{Name: "--exec-path"},
+					{Name: "--upload-pack", Message: "upload-pack is dangerous"},
+				},
+				SubCommands: []config.SubCommandRule{
+					{Name: "status"},
+					{Name: "log"},
+					{
+						Name:      "push",
+						DenyFlags: []string{"-f"},
+					},
+				},
+			},
+		},
+		DefaultErrorMessage: "Command not allowed",
+	}
+
+	var logBuffer bytes.Buffer
+	log := logger.NewWithWriter(&logBuffer)
+	v := New(cfg, log)
+
+	tests := []struct {
+		name            string
+		cmd             string
+		args            []string
+		allowed         bool
+		messageContains string
+	}{
+		// Baseline: git status without any global flags is still allowed.
+		{name: "GitStatusBaseline", cmd: "git", args: []string{"status"}, allowed: true},
+
+		// -C with value (within allowed directory) is allowed before status.
+		{name: "GitDashCStatus", cmd: "git", args: []string{"-C", "/opt/src/foo", "status"}, allowed: true},
+		{name: "GitDashCStatusTmp", cmd: "git", args: []string{"-C", "/tmp/repo", "status"}, allowed: true},
+
+		// -C with disallowed directory is rejected by path validation.
+		{name: "GitDashCDisallowedDir", cmd: "git", args: []string{"-C", "/etc", "status"}, allowed: false, messageContains: "is outside of allowed directories"},
+
+		// --git-dir=value form must also reject paths outside allowed directories.
+		{name: "GitDirEqualsDisallowedDir", cmd: "git", args: []string{"--git-dir=/etc/.git", "status"}, allowed: false, messageContains: "is outside of allowed directories"},
+
+		// --no-pager (no value) before subcommand.
+		{name: "GitNoPagerStatus", cmd: "git", args: []string{"--no-pager", "status"}, allowed: true},
+
+		// Stacked global flags: --no-pager + -C value.
+		{name: "GitNoPagerDashCStatus", cmd: "git", args: []string{"--no-pager", "-C", "/tmp", "status"}, allowed: true},
+
+		// --git-dir=/path form (=value) is also recognized.
+		{name: "GitDirEqualsForm", cmd: "git", args: []string{"--git-dir=/tmp/.git", "status"}, allowed: true},
+
+		// --git-dir /path form (separate value).
+		{name: "GitDirSeparateValue", cmd: "git", args: []string{"--git-dir", "/tmp/.git", "status"}, allowed: true},
+
+		// Unknown leading flag still falls through to subcommand match and is rejected.
+		{name: "UnknownLeadingFlag", cmd: "git", args: []string{"--bogus", "status"}, allowed: false, messageContains: `subcommand "--bogus" is not allowed`},
+
+		// denyGlobalFlags: --exec-path is rejected at the leading position.
+		{name: "DenyExecPathLeading", cmd: "git", args: []string{"--exec-path", "/x", "status"}, allowed: false, messageContains: `flag "--exec-path"`},
+
+		// denyGlobalFlags: --exec-path=value form blocked.
+		{name: "DenyExecPathEquals", cmd: "git", args: []string{"--exec-path=/x", "status"}, allowed: false, messageContains: `flag "--exec-path"`},
+
+		// denyGlobalFlags applies anywhere in args, not just leading.
+		{name: "DenyExecPathAfterSubCmd", cmd: "git", args: []string{"status", "--exec-path=/x"}, allowed: false, messageContains: `flag "--exec-path"`},
+
+		// denyGlobalFlags with custom message.
+		{name: "DenyUploadPackMessage", cmd: "git", args: []string{"--upload-pack=foo", "status"}, allowed: false, messageContains: "upload-pack is dangerous"},
+
+		// global flags work with denyFlags at subcommand level.
+		{name: "GitDashCPushForce", cmd: "git", args: []string{"-C", "/tmp", "push", "-f"}, allowed: false, messageContains: `flag "-f"`},
+
+		// global flags work with denySubCommands.
+		{name: "GitDashCUnknownSub", cmd: "git", args: []string{"-C", "/tmp", "checkout"}, allowed: false, messageContains: `subcommand "checkout" is not allowed`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logBuffer.Reset()
+			gotAllowed, gotMessage := v.ValidateCommand(tt.cmd, tt.args, "/home")
+			if gotAllowed != tt.allowed {
+				t.Errorf("ValidateCommand(%s %v) allowed = %v, want %v (message: %q)", tt.cmd, tt.args, gotAllowed, tt.allowed, gotMessage)
+			}
+			if tt.messageContains != "" && !strings.Contains(gotMessage, tt.messageContains) {
+				t.Errorf("ValidateCommand(%s %v) message = %q, want to contain %q", tt.cmd, tt.args, gotMessage, tt.messageContains)
+			}
+		})
+	}
+}
+
+// TestDenyGlobalFlagsWithoutSubCommands verifies that denyGlobalFlags works
+// even on commands that have no SubCommands restriction (the early-return
+// path in ValidateCommand).
+func TestDenyGlobalFlagsWithoutSubCommands(t *testing.T) {
+	cfg := &config.ShellCommandConfig{
+		AllowedDirectories: []string{"/home", "/tmp"},
+		AllowCommands: []config.AllowCommand{
+			{
+				Command: "curl",
+				DenyGlobalFlags: []config.GlobalFlag{
+					{Name: "--upload-file", Message: "uploads are not allowed"},
+				},
+			},
+		},
+		DefaultErrorMessage: "Command not allowed",
+	}
+
+	var logBuffer bytes.Buffer
+	log := logger.NewWithWriter(&logBuffer)
+	v := New(cfg, log)
+
+	t.Run("AllowedWithoutDeniedFlag", func(t *testing.T) {
+		ok, _ := v.ValidateCommand("curl", []string{"https://example.com"}, "/home")
+		if !ok {
+			t.Errorf("plain curl should be allowed")
+		}
+	})
+
+	t.Run("BlockedDeniedGlobalFlag", func(t *testing.T) {
+		ok, msg := v.ValidateCommand("curl", []string{"--upload-file", "/etc/passwd", "https://x"}, "/home")
+		if ok {
+			t.Errorf("--upload-file should be blocked")
+		}
+		if !strings.Contains(msg, "uploads are not allowed") {
+			t.Errorf("expected custom message, got %q", msg)
+		}
+	})
+}
+
 // TestCommandLogging tests the command logging functionality.
 func TestCommandLogging(t *testing.T) {
 	// Create temporary directories for testing

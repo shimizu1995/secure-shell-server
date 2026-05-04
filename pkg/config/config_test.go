@@ -218,6 +218,124 @@ func TestAllowCommandWithDenyFlags(t *testing.T) {
 	}
 }
 
+func TestGlobalFlagDeserialization(t *testing.T) {
+	tests := []struct {
+		name           string
+		json           string
+		wantName       string
+		wantTakesValue bool
+		wantMessage    string
+		wantErr        bool
+	}{
+		{
+			name:     "string value becomes GlobalFlag with name only",
+			json:     `"--no-pager"`,
+			wantName: "--no-pager",
+		},
+		{
+			name:           "object with takesValue",
+			json:           `{"name": "-C", "takesValue": true}`,
+			wantName:       "-C",
+			wantTakesValue: true,
+		},
+		{
+			name:        "object with message",
+			json:        `{"name": "--exec-path", "message": "Custom exec-path is dangerous"}`,
+			wantName:    "--exec-path",
+			wantMessage: "Custom exec-path is dangerous",
+		},
+		{
+			name:           "object with both takesValue and message",
+			json:           `{"name": "--git-dir", "takesValue": true, "message": "blocked"}`,
+			wantName:       "--git-dir",
+			wantTakesValue: true,
+			wantMessage:    "blocked",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gf GlobalFlag
+			err := json.Unmarshal([]byte(tt.json), &gf)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if gf.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", gf.Name, tt.wantName)
+			}
+			if gf.TakesValue != tt.wantTakesValue {
+				t.Errorf("TakesValue = %v, want %v", gf.TakesValue, tt.wantTakesValue)
+			}
+			if gf.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", gf.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestAllowCommandWithGlobalFlags(t *testing.T) {
+	const configJSON = `{
+		"allowedDirectories": ["/home"],
+		"allowCommands": [
+			{
+				"command": "git",
+				"globalFlags": [
+					"--no-pager",
+					{"name": "-C", "takesValue": true},
+					{"name": "--git-dir", "takesValue": true}
+				],
+				"denyGlobalFlags": [
+					"--exec-path",
+					{"name": "--upload-pack", "message": "upload-pack is dangerous"}
+				],
+				"subCommands": ["status", "log"]
+			}
+		],
+		"denyCommands": [],
+		"defaultErrorMessage": "Not allowed"
+	}`
+
+	var cfg ShellCommandConfig
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	git := cfg.AllowCommands[0]
+	if len(git.GlobalFlags) != 3 {
+		t.Fatalf("GlobalFlags length = %d, want 3", len(git.GlobalFlags))
+	}
+
+	// "--no-pager" simple form
+	if git.GlobalFlags[0].Name != "--no-pager" {
+		t.Errorf("GlobalFlags[0].Name = %q, want '--no-pager'", git.GlobalFlags[0].Name)
+	}
+	if git.GlobalFlags[0].TakesValue {
+		t.Errorf("GlobalFlags[0].TakesValue = true, want false")
+	}
+
+	// "-C" with takesValue
+	if git.GlobalFlags[1].Name != "-C" {
+		t.Errorf("GlobalFlags[1].Name = %q, want '-C'", git.GlobalFlags[1].Name)
+	}
+	if !git.GlobalFlags[1].TakesValue {
+		t.Errorf("GlobalFlags[1].TakesValue = false, want true")
+	}
+
+	// DenyGlobalFlags
+	if len(git.DenyGlobalFlags) != 2 {
+		t.Fatalf("DenyGlobalFlags length = %d, want 2", len(git.DenyGlobalFlags))
+	}
+	if git.DenyGlobalFlags[0].Name != "--exec-path" {
+		t.Errorf("DenyGlobalFlags[0].Name = %q, want '--exec-path'", git.DenyGlobalFlags[0].Name)
+	}
+	if git.DenyGlobalFlags[1].Message != "upload-pack is dangerous" {
+		t.Errorf("DenyGlobalFlags[1].Message = %q, want 'upload-pack is dangerous'", git.DenyGlobalFlags[1].Message)
+	}
+}
+
 func TestUseEnvPwdConfig(t *testing.T) {
 	t.Run("useEnvPwd true", func(t *testing.T) {
 		const configJSON = `{

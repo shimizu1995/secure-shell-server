@@ -179,14 +179,22 @@ func (v *CommandValidator) ValidateCommand(cmd string, args []string, workDir st
 	// Check if the command is explicitly allowed
 	for _, allowed := range v.config.AllowCommands {
 		if allowed.Command == cmd {
+			// Deny global flags are checked across all args before anything else.
+			if denied, message := v.checkDenyGlobalFlags(cmd, args, allowed.DenyGlobalFlags); denied {
+				return false, message
+			}
+
 			// If there are no subcommands specified, the command is allowed without restrictions
 			if len(allowed.SubCommands) == 0 && len(allowed.DenySubCommands) == 0 {
 				// Check path-like arguments even for fully allowed commands
 				return v.validatePathArguments(cmd, args, workDir)
 			}
 
+			// Strip leading global flags before subcommand matching.
+			subArgs := stripLeadingGlobalFlags(args, allowed.GlobalFlags)
+
 			// Check subcommand permissions
-			if allowed, message := v.checkSubCommandPermissions(cmd, args, allowed); !allowed {
+			if ok, message := v.checkSubCommandRule(cmd, subArgs, allowed.SubCommands, allowed.DenySubCommands, nil, ""); !ok {
 				return false, message
 			}
 
@@ -204,13 +212,24 @@ func (v *CommandValidator) ValidateCommand(cmd string, args []string, workDir st
 // validatePathArguments checks if any path-like arguments are within allowed directories.
 func (v *CommandValidator) validatePathArguments(cmd string, args []string, workDir string) (bool, string) {
 	for _, arg := range args {
-		// Skip arguments that don't look like paths or that start with a dash (flags)
-		if strings.HasPrefix(arg, "-") || !v.isPathLike(arg) {
+		pathArg := arg
+
+		// `--flag=value` form: extract the value portion so its embedded path is
+		// validated. Without this, `--git-dir=/etc/.git` would skip path checks
+		// because the whole arg starts with `-`.
+		if strings.HasPrefix(arg, "-") {
+			eq := strings.IndexByte(arg, '=')
+			if eq < 0 {
+				continue
+			}
+			pathArg = arg[eq+1:]
+		}
+
+		if !v.isPathLike(pathArg) {
 			continue
 		}
 
-		// Validate the path argument
-		allowed, message := v.IsPathInAllowedDirectory(arg, workDir)
+		allowed, message := v.IsPathInAllowedDirectory(pathArg, workDir)
 		if !allowed {
 			v.logBlockedCommand(cmd, args, message)
 			return false, message
@@ -234,11 +253,63 @@ func (v *CommandValidator) isCommandExplicitlyDenied(cmd string) (bool, string) 
 	return false, ""
 }
 
-// checkSubCommandPermissions checks if the subcommand is allowed for the specified command.
-// It delegates to the recursive checkSubCommandRule for the top-level AllowCommand.
-func (v *CommandValidator) checkSubCommandPermissions(cmd string, args []string, allowed config.AllowCommand) (bool, string) {
-	// Convert top-level AllowCommand into a SubCommandRule-compatible check
-	return v.checkSubCommandRule(cmd, args, allowed.SubCommands, allowed.DenySubCommands, nil, "")
+// stripLeadingGlobalFlags returns args with leading global flags (and their
+// values when TakesValue is true) removed. It stops at the first arg that
+// does not match any allowed global flag, leaving the rest for subcommand
+// matching.
+func stripLeadingGlobalFlags(args []string, globalFlags []config.GlobalFlag) []string {
+	if len(globalFlags) == 0 {
+		return args
+	}
+	i := 0
+	for i < len(args) {
+		gf, matched := matchGlobalFlag(args[i], globalFlags)
+		if !matched {
+			break
+		}
+		// `--name=value` already bundles the value in args[i].
+		hasInlineValue := strings.Contains(args[i], "=")
+		i++
+		if gf.TakesValue && !hasInlineValue && i < len(args) {
+			i++
+		}
+	}
+	return args[i:]
+}
+
+// matchGlobalFlag reports whether arg matches one of globalFlags by exact
+// name (`-C`) or `--name=value` form. Returns the matched flag spec.
+func matchGlobalFlag(arg string, globalFlags []config.GlobalFlag) (config.GlobalFlag, bool) {
+	for _, gf := range globalFlags {
+		if arg == gf.Name {
+			return gf, true
+		}
+		if strings.HasPrefix(arg, gf.Name+"=") {
+			return gf, true
+		}
+	}
+	return config.GlobalFlag{}, false
+}
+
+// checkDenyGlobalFlags scans every arg and returns true with an error message
+// if any matches a denyGlobalFlag. Matches anywhere in args, not just leading.
+func (v *CommandValidator) checkDenyGlobalFlags(cmd string, args []string, denyFlags []config.GlobalFlag) (bool, string) {
+	if len(denyFlags) == 0 {
+		return false, ""
+	}
+	for _, arg := range args {
+		gf, matched := matchGlobalFlag(arg, denyFlags)
+		if !matched {
+			continue
+		}
+		message := fmt.Sprintf("flag %q is not allowed for command %q", gf.Name, cmd)
+		if gf.Message != "" {
+			message += ": " + gf.Message
+		}
+		v.logBlockedCommand(cmd, args, message)
+		return true, message
+	}
+	return false, ""
 }
 
 // checkSubCommandRule recursively validates args against a SubCommandRule tree.
