@@ -239,23 +239,10 @@ func (r *SafeRunner) ValidateScript(ctx context.Context, command string, working
 	// ExecHandler that performs no actual execution.
 	noopExec := func(_ context.Context, _ []string) error { return nil }
 
-	// OpenHandler that validates the directory but never opens real files.
+	// validate-only OpenHandler: shared path check, no real file is opened.
 	validateOnlyOpen := func(_ context.Context, path string, _ int, _ os.FileMode) (io.ReadWriteCloser, error) {
-		absPath, absErr := filepath.Abs(path)
-		if absErr != nil {
-			return nil, &os.PathError{Op: "open", Path: path, Err: absErr}
-		}
-		if resolved, resolveErr := filepath.EvalSymlinks(absPath); resolveErr == nil {
-			absPath = resolved
-		}
-		fileDir := filepath.Dir(absPath)
-		allowed, msg := r.validator.IsDirectoryAllowed(fileDir)
-		if !allowed {
-			return nil, &os.PathError{
-				Op:   "open",
-				Path: path,
-				Err:  fmt.Errorf("access denied: file is outside allowed directories: %s", msg),
-			}
+		if pathErr := r.validateOpenPath(path); pathErr != nil {
+			return nil, pathErr
 		}
 		return discardRWC{}, nil
 	}
@@ -311,12 +298,19 @@ func (discardRWC) Read(_ []byte) (int, error)  { return 0, io.EOF }
 func (discardRWC) Write(p []byte) (int, error) { return len(p), nil }
 func (discardRWC) Close() error                { return nil }
 
-// secureOpenHandler validates file access against allowed directories before opening.
-func (r *SafeRunner) secureOpenHandler(ctx context.Context, path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+// validateOpenPath is the single source of truth for file-open path checks.
+// Both the executing handler (secureOpenHandler) and the validate-only handler
+// used by ValidateScript / hook mode go through here, so a redirect target like
+// /dev/null is allowed under exactly the same rules in both modes.
+//
+// IsPathInAllowedDirectory (not IsDirectoryAllowed(fileDir)) lets a specific
+// file path like /dev/null be permitted when listed verbatim in
+// allowedDirectories — its parent /dev is not in the allowlist.
+func (r *SafeRunner) validateOpenPath(path string) error {
 	absPath, absErr := filepath.Abs(path)
 	if absErr != nil {
 		r.logger.LogErrorf("Failed to get absolute path for file %s: %v", path, absErr)
-		return nil, &os.PathError{Op: "open", Path: path, Err: absErr}
+		return &os.PathError{Op: "open", Path: path, Err: absErr}
 	}
 
 	// Resolve symlinks to prevent directory escape via symlinks
@@ -324,19 +318,23 @@ func (r *SafeRunner) secureOpenHandler(ctx context.Context, path string, flag in
 		absPath = resolved
 	}
 
-	// Check if the file path is within an allowed directory, or is itself an explicitly allowed path.
-	// Using IsPathInAllowedDirectory instead of IsDirectoryAllowed(fileDir) allows specific files
-	// like /dev/null to be permitted when listed in allowedDirectories.
 	allowed, msg := r.validator.IsPathInAllowedDirectory(absPath, "/")
 	if !allowed {
 		r.logger.LogErrorf("File access attempted outside allowed directories: %s", absPath)
-		return nil, &os.PathError{
+		return &os.PathError{
 			Op:   "open",
 			Path: path,
 			Err:  fmt.Errorf("access denied: file is outside allowed directories: %s", msg),
 		}
 	}
+	return nil
+}
 
+// secureOpenHandler validates file access against allowed directories before opening.
+func (r *SafeRunner) secureOpenHandler(ctx context.Context, path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+	if err := r.validateOpenPath(path); err != nil {
+		return nil, err
+	}
 	return interp.DefaultOpenHandler()(ctx, path, flag, perm)
 }
 

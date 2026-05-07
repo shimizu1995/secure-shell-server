@@ -105,3 +105,42 @@ func TestSafeRunner_ValidateScript_DefaultExpansionAllowed(t *testing.T) {
 	err := safeRunner.ValidateScript(t.Context(), script, "/tmp")
 	assert.NoError(t, err)
 }
+
+// TestSafeRunner_ValidateScript_DevNullRedirect mirrors TestSafeRunner_DevNullRedirect
+// for the ValidateScript path used by hook mode. The validator must treat a redirect
+// to /dev/null the same way as RunCommand: allowed when /dev/null is explicitly in
+// allowedDirectories, even though its parent /dev is not.
+func TestSafeRunner_ValidateScript_DevNullRedirect(t *testing.T) {
+	cfg := setupCustomConfig()
+	cfg.AllowedDirectories = append(cfg.AllowedDirectories, "/dev/null")
+	log := logger.New()
+	validatorObj := validator.New(cfg, log)
+	safeRunner := New(cfg, validatorObj, log)
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "StderrRedirect", command: "ls /tmp 2>/dev/null"},
+		{name: "StdoutRedirect", command: "echo hi >/dev/null"},
+		{name: "BothRedirect", command: "echo hi >/dev/null 2>&1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := safeRunner.ValidateScript(t.Context(), tt.command, "/tmp")
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// TestSafeRunner_ValidateScript_DevNullBlockedWhenNotConfigured ensures the
+// permissive path-equals-file behavior is gated on the explicit allowlist entry.
+func TestSafeRunner_ValidateScript_DevNullBlockedWhenNotConfigured(t *testing.T) {
+	cfg := setupCustomConfig()
+	log := logger.New()
+	validatorObj := validator.New(cfg, log)
+	safeRunner := New(cfg, validatorObj, log)
+
+	err := safeRunner.ValidateScript(t.Context(), "echo hi >/dev/null", "/tmp")
+	assert.Error(t, err)
+}
